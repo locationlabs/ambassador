@@ -160,14 +160,14 @@ class Restarter(threading.Thread):
         changes = self.changes()
         plural = "" if (changes == 1) else "s"
 
-        logger.info("generating config with gencount %d (%d change%s)" % 
+        logger.info("generating config with gencount %d (%d change%s)" %
                     (self.restart_count, changes, plural))
 
         aconf = Config(output)
         rc = aconf.generate_envoy_config(mode="kubewatch",
                                          generation_count=self.restart_count)
 
-        logger.info("Scout reports %s" % json.dumps(rc.scout_result))       
+        logger.info("Scout reports %s" % json.dumps(rc.scout_result))
 
         if rc:
             envoy_config = "%s-%s" % (output, "envoy.json")
@@ -255,7 +255,7 @@ def sync(restarter):
 
     if v1:
         # We have a Kube API! Do we have an ambassador-config ConfigMap?
-        cm_names = [ x.metadata.name 
+        cm_names = [ x.metadata.name
                      for x in v1.list_namespaced_config_map(restarter.namespace).items ]
 
         if 'ambassador-config' in cm_names:
@@ -269,9 +269,9 @@ def sync(restarter):
         # If we don't already see a TLS server key in its usual spot...
         if not check_cert_file(TLSPaths.mount_tls_crt.value):
             # ...then try pulling keys directly from the configmaps.
-            (server_cert, server_key, server_data) = read_cert_secret(v1, "ambassador-certs", 
+            (server_cert, server_key, server_data) = read_cert_secret(v1, "ambassador-certs",
                                                                       restarter.namespace)
-            (client_cert, _, client_data) = read_cert_secret(v1, "ambassador-cacert", 
+            (client_cert, _, client_data) = read_cert_secret(v1, "ambassador-cacert",
                                                              restarter.namespace)
 
             if server_cert and server_key:
@@ -308,14 +308,16 @@ def sync(restarter):
 
         # Next, check for annotations and such.
         svc_list = None
+        label_selector = os.environ.get('AMBASSADOR_SVC_LABEL_SELECTOR')
 
         if "AMBASSADOR_SINGLE_NAMESPACE" in os.environ:
-            svc_list = v1.list_namespaced_service(restarter.namespace)
+            svc_list = v1.list_namespaced_service(restarter.namespace,
+                                                  label_selector=label_selector)
         else:
-            svc_list = v1.list_service_for_all_namespaces()
+            svc_list = v1.list_service_for_all_namespaces(label_selector=label_selector)
 
         if svc_list:
-            logger.debug("sync: found %d service%s" % 
+            logger.debug("sync: found %d service%s" %
                          (len(svc_list.items), ("" if (len(svc_list.items) == 1) else "s")))
 
             for svc in svc_list.items:
@@ -323,7 +325,7 @@ def sync(restarter):
         else:
             logger.debug("sync: no services found")
 
-    # Always generate an initial envoy config.    
+    # Always generate an initial envoy config.
     logger.debug("Generating initial Envoy config")
     restarter.restart()
 
@@ -333,14 +335,17 @@ def watch_loop(restarter):
     if v1:
         w = watch.Watch()
 
+        label_selector = os.environ.get('AMBASSADOR_SVC_LABEL_SELECTOR')
+
         if "AMBASSADOR_SINGLE_NAMESPACE" in os.environ:
-            watched = w.stream(v1.list_namespaced_service, namespace=restarter.namespace)
+            watched = w.stream(v1.list_namespaced_service, namespace=restarter.namespace,
+                               label_selector=label_selector)
         else:
-            watched = w.stream(v1.list_service_for_all_namespaces)
+            watched = w.stream(v1.list_service_for_all_namespaces, label_selector=label_selector)
 
         for evt in watched:
-            logger.debug("Event: %s %s/%s" % 
-                         (evt["type"], 
+            logger.debug("Event: %s %s/%s" %
+                         (evt["type"],
                           evt["object"].metadata.namespace, evt["object"].metadata.name))
             sys.stdout.flush()
 
@@ -384,17 +389,17 @@ def main(mode, ambassador_config_dir, envoy_config_file, delay, pid):
     restarts too frequently. This leaves us with three delay
     parameters that needed to be tuned with increasing values that
     have sufficient margins:
-    
+
       --drain-time-s (an envoy parameter)
-    
+
          This is time permitted for active connections to drain from
          the old envoy. This is the smallest value. What you want to
          tune this to depends on your scenario, e.g. edge scenarios
          will likely want to permit more drain time, maybe 5 or 10
          minutes.
-    
+
       --parent-shutdown-time-s (an envoy parameter)
-    
+
          This is the time the new envoy gives the old envoy to
          complete it's drain before shutting it down. This is an
          absolute time measured from the initiation of the restart,
@@ -402,14 +407,14 @@ def main(mode, ambassador_config_dir, envoy_config_file, delay, pid):
          configured drain time. It should also be a bit larger than
          the drain time to account for timing discrepencies. Envoy
          examples seem to set it to 50% more than the drain time.
-    
+
       --delay (a parameter of this script)
-    
+
          This is the restart delay. It limits the minimum time this
          script will allow between subsequent restarts. This should be
          configured to be larger than the --parent-shutdown-time-s
          option by a reasonable margin.
-    
+
     In addition to the timing involved, envoy's restart machinery will
     die completely (both killing the old and new envoy) if the new
     envoy is supplied with an invalid configuration. This script takes
