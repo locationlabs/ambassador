@@ -308,13 +308,15 @@ def sync(restarter):
 
         # Next, check for annotations and such.
         svc_list = None
+        kwargs_param = dict()
         label_selector = os.environ.get('AMBASSADOR_SVC_LABEL_SELECTOR')
+        if label_selector:
+            kwargs_param['label_selector'] = label_selector
 
         if "AMBASSADOR_SINGLE_NAMESPACE" in os.environ:
-            svc_list = v1.list_namespaced_service(restarter.namespace,
-                                                  label_selector=label_selector)
+            svc_list = v1.list_namespaced_service(restarter.namespace, **kwargs_param)
         else:
-            svc_list = v1.list_service_for_all_namespaces(label_selector=label_selector)
+            svc_list = v1.list_service_for_all_namespaces(**kwargs_param)
 
         if svc_list:
             logger.debug("sync: found %d service%s" %
@@ -335,13 +337,16 @@ def watch_loop(restarter):
     if v1:
         w = watch.Watch()
 
+        kwargs_param = dict()
         label_selector = os.environ.get('AMBASSADOR_SVC_LABEL_SELECTOR')
+        if label_selector:
+            kwargs_param['label_selector'] = label_selector
 
         if "AMBASSADOR_SINGLE_NAMESPACE" in os.environ:
             watched = w.stream(v1.list_namespaced_service, namespace=restarter.namespace,
-                               label_selector=label_selector)
+                               **kwargs_param)
         else:
-            watched = w.stream(v1.list_service_for_all_namespaces, label_selector=label_selector)
+            watched = w.stream(v1.list_service_for_all_namespaces, **kwargs_param)
 
         for evt in watched:
             logger.debug("Event: %s %s/%s" %
